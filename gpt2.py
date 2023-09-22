@@ -60,9 +60,9 @@ def mha(x, c_attn, c_proj, n_head):  # [n_seq, n_embd] -> [n_seq, n_embd]
     return x
 
 
-def transformer_block(x, mlp, attn, ln_1, ln_2, n_head):  # [n_seq, n_embd] -> [n_seq, n_embd]
+def transformer_block(x, mlp, attn, ln_1, ln_2, n_head, c0):  # [n_seq, n_embd] -> [n_seq, n_embd]
     # multi-head causal self attention
-    x = x + mha(layer_norm(x, **ln_1), **attn, n_head=n_head)  # [n_seq, n_embd] -> [n_seq, n_embd]
+    x = x + c0 * mha(layer_norm(x, **ln_1), **attn, n_head=n_head)  # [n_seq, n_embd] -> [n_seq, n_embd]
 
     # position-wise feed forward network
     x = x + ffn(layer_norm(x, **ln_2), **mlp)  # [n_seq, n_embd] -> [n_seq, n_embd]
@@ -70,31 +70,31 @@ def transformer_block(x, mlp, attn, ln_1, ln_2, n_head):  # [n_seq, n_embd] -> [
     return x
 
 
-def gpt2(inputs, wte, wpe, blocks, ln_f, n_head):  # [n_seq] -> [n_seq, n_vocab]
+def gpt2(inputs, wte, wpe, blocks, ln_f, n_head, c0):  # [n_seq] -> [n_seq, n_vocab]
     # token + positional embeddings
     x = wte[inputs] + wpe[range(len(inputs))]  # [n_seq] -> [n_seq, n_embd]
 
     # forward pass through n_layer transformer blocks
     for block in blocks:
-        x = transformer_block(x, **block, n_head=n_head)  # [n_seq, n_embd] -> [n_seq, n_embd]
+        x = transformer_block(x, **block, n_head=n_head, c0=c0)  # [n_seq, n_embd] -> [n_seq, n_embd]
 
     # projection to vocab
     x = layer_norm(x, **ln_f)  # [n_seq, n_embd] -> [n_seq, n_embd]
     return x @ wte.T  # [n_seq, n_embd] -> [n_seq, n_vocab]
 
 
-def generate(inputs, params, n_head, n_tokens_to_generate):
+def generate(inputs, params, n_head, n_tokens_to_generate, c0):
     from tqdm import tqdm
 
     for _ in tqdm(range(n_tokens_to_generate), "generating"):  # auto-regressive decode loop
-        logits = gpt2(inputs, **params, n_head=n_head)  # model forward pass
+        logits = gpt2(inputs, **params, n_head=n_head, c0=c0)  # model forward pass
         next_id = np.argmax(logits[-1])  # greedy sampling
         inputs.append(int(next_id))  # append prediction to input
 
     return inputs[len(inputs) - n_tokens_to_generate :]  # only return generated ids
 
 
-def main(prompt: str, n_tokens_to_generate: int = 40, model_size: str = "124M", models_dir: str = "models"):
+def main(prompt: str, n_tokens_to_generate: int = 40, model_size: str = "124M", models_dir: str = "models", c0 = 1.0):
     from utils import load_encoder_hparams_and_params
 
     # load encoder, hparams, and params from the released open-ai gpt-2 files
@@ -107,7 +107,7 @@ def main(prompt: str, n_tokens_to_generate: int = 40, model_size: str = "124M", 
     assert len(input_ids) + n_tokens_to_generate < hparams["n_ctx"]
 
     # generate output ids
-    output_ids = generate(input_ids, params, hparams["n_head"], n_tokens_to_generate)
+    output_ids = generate(input_ids, params, hparams["n_head"], n_tokens_to_generate, c0)
 
     # decode the ids back into a string
     output_text = encoder.decode(output_ids)
